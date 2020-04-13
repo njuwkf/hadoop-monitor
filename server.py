@@ -1,6 +1,7 @@
 #!usr/bin/python
 # -*- coding: utf-8 -*-
 
+import re
 import traceback
 import sys
 import os
@@ -99,7 +100,7 @@ def add_record(rec, d):
                         return
                 cmd = rec['cmd']
                 pid = rec['pid']
-                exename = os.path.basename(cmd.split()[0]) if cmd else "None"
+                exename = os.path.basename(cmd[0]) if cmd else "None"
                 rss = rec['rss']
                 vms = rec['vms']
                 cpu = rec['cpu']
@@ -127,10 +128,10 @@ def time_to_string(t, full=False):
 urls = (
         '/', 'jobs_view',
         '/jobs', 'jobs_view',
-        '/job_([_/d]+)', 'job_view',
-        '/(attempt_[^/s]+)', 'attempt_view',
-        '/text/(attempt_[^/s]+)', 'attempt_text_view',
-        '/fig/(attempt_[^/s]+).png', 'attempt_fig',
+        '/job_([_\d]+)', 'job_view',
+        '/(attempt_[^\s]+)', 'attempt_view',
+        '/text/(attempt_[^\s]+)', 'attempt_text_view',
+        '/fig/(attempt_[^\s]+).png', 'attempt_fig',
         '/submit', 'submit_service',
         '/save', 'save_service',
         '/load', 'load_service',
@@ -156,13 +157,16 @@ class jobs_view(object):
                         out.write('<h1>No Jobs Found</h1>')
                 out.write('</body></html>')
                 return out.getvalue()
-
-#单个任务界面（显示单个job_id，该任务下各个task的id和最后更新时间）
+        def POST(self):
+                self.GET()
 class job_view(object):
         def GET(self, job_id):
                 out = StringIO.StringIO()
-                out.write('<html><head><title>Job %s</title></head><body>/n' % job_id)
-                out.write('<h1>JobID: %s</h1>/n' % job_id)
+
+#单个任务界面（显示单个job_id，该任务下各个task的id和最后更新时间）
+                print job_id
+                out.write('<html><head><title>Job %s</title></head><body>' % job_id)
+                out.write('<h1>JobID: %s</h1>' % job_id)
                 job = all.get(job_id)
                 if not job:
                         out.write('Not Found!')
@@ -172,21 +176,23 @@ class job_view(object):
                         have = False
                         for attempt, obj in job.attempts.iteritems():
                                 have = True
-                                out.write('<li><a href="/%s" mce_href="%s">%s</a> Last Update: %s on %s</li>' % (attempt, attempt, time_to_string(obj.time, True), obj.host))
+                                out.write('<li><a href="/%s" mce_href="%s">%s</a> Last Update: %s on %s</li>' % (attempt, attempt,attempt, time_to_string(obj.time, True), obj.host))
                         if not have:
-                                out.write('<h1>No Jobs Found</h1>/n')
-                out.write('</body></html>/n')
+                                out.write('<h1>No Jobs Found</h1>')
+                out.write('</body></html>')
                 return out.getvalue()
+        def POST(self, job_id):
+                self.GET(job_id)
 
 def output_seq(name, seq, out, t=False):
         out.write('<tr>')
-        out.write('<td>%s</td>/n' % name)
+        out.write('<td>%s</td>\n' % name)
         for v in seq:
-                out.write('    <td>%s</td>/n' % (time_to_string(v) if t else str(v)))
+                out.write('    <td>%s</td>\n' % (time_to_string(v) if t else str(v)))
         out.write('</tr>')
 
 def output_exeinfo(exe, out):
-        out.write('<h2>%s - %s</h2>/n' % (exe.id, exe.exe) )
+        out.write('<h2>%s - %s</h2>\n' % (exe.id, exe.exe) )
         out.write('<table>')
         output_seq("Time:", exe.seqs['t'].vs,out,True)
         output_seq("CPU:", exe.seqs['c'].vs,out)
@@ -198,7 +204,7 @@ def output_exeinfo(exe, out):
 class attempt_view(object):
         def GET(self, attempt_id):
                 out = StringIO.StringIO()
-                out.write('<html><head><title>Job Attempt %s</title></head><body>/n' % attempt_id)
+                out.write('<html><head><title>Job Attempt %s</title></head><body>' % attempt_id)
                 jobid = get_jobid_by_attempid(attempt_id)
                 job = all.get(jobid)
                 if not job:
@@ -208,18 +214,20 @@ class attempt_view(object):
                         if not attempt:
                                 out.write('Not Found!')
                         else:
-                                out.write('<h1>Attempt run on %s, %s last update: %s</h1>/n' % (attempt.host, attempt_id, time_to_string(attempt.time)))
-                                out.write('<h3><a href="/text/%s" mce_href="text/%s">Text Detail</a></h3>/n' % attempt_id)
-                                out.write('<image src="/fig/%s.png" mce_src="fig/%s.png" />/n' % attempt_id)
-                out.write('</body></html>/n')
+                                out.write('<h1>Attempt run on %s, %s last update: %s</h1>' % (attempt.host, attempt_id, time_to_string(attempt.time)))
+                                out.write('<h3><a href="/text/%s" mce_href="text/%s">Text Detail</a></h3>' % (attempt_id,attempt_id))
+                                out.write('<image src="/fig/%s.png" mce_src="fig/%s.png" />' % (attempt_id,attempt_id))
+                out.write('</body></html>\n')
                 return out.getvalue()
+        def POST(self, attempt_id):
+                self.GET(attempt_id)
 
 
 # 单个task_attempt文本界面（显示单个task_attempt时间，CPU，内存信息）
 class attempt_text_view(object):
         def GET(self, attempt_id):
                 out = StringIO.StringIO()
-                out.write('<html><head><title>Job Attempt %s</title></head><body>/n' % attempt_id)
+                out.write('<html><head><title>Job Attempt %s</title></head><body>\n' % attempt_id)
                 jobid = get_jobid_by_attempid(attempt_id)
                 job = all.get(jobid)
                 if not job:
@@ -229,11 +237,13 @@ class attempt_text_view(object):
                         if not attempt:
                                 out.write('Not Found!')
                         else:
-                                out.write('<h1>%s last update: %s</h1>/n' % (attempt_id, time_to_string(attempt.time)))
+                                out.write('<h1>%s last update: %s</h1>\n' % (attempt_id, time_to_string(attempt.time)))
                                 for exe in attempt.exes.itervalues():
                                         output_exeinfo(exe, out)
-                out.write('</body></html>/n')
+                out.write('</body></html>\n')
                 return out.getvalue()
+        def POST(self, attempt_id):
+                self.GET(attempt_id)
 
 # 单个task_attempt图片界面（显示单个task_attempt时间，CPU，内存信息）
 class attempt_fig(object):
@@ -268,15 +278,19 @@ class attempt_fig(object):
                 buff = StringIO.StringIO()
                 fig.savefig(buff, format='png')
                 return buff.getvalue()
+        def POST(self, attempt_id):
+                self.GET(attempt_id)
 
 class submit_service(object):
         def POST(self):
                 c = web.input().get('content')
-                records = c.split('/n')
+                records = c.split('\n')
                 for r in records:
                         if len(r) < 4:
                                 continue
                         add_record(json.loads(r), all)
+        def GET(self):
+                self.POST()
 
 class save_service(object):
         def GET(self):
@@ -303,7 +317,8 @@ class load_service(object):
                         return "LOAD OK"
                 else:
                         return web.notfound
-
+        def POST(self):
+                self.GET()
 class clean_service(object):
         def GET(self):
                 global all
@@ -316,5 +331,7 @@ class clean_service(object):
                         return "SAVE OK"
                 else:
                         return web.notfound
+        def POST(self):
+                self.GET()
 if __name__ == "__main__":
         app.run()

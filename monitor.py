@@ -41,12 +41,11 @@ def get_event(pid, attempt_id, t):
             "tsystem": timeinfo[1],
             "rss": meminfo[0],
             "vms": meminfo[1],
-            "cpu": p.cpu_percent(0.0),
+            "cpu": p.cpu_percent(),
             "threads": p.num_threads(),
             "host": hostname}
     ret = json.dumps(info)
-    # print ret
-    return ret + "/n"
+    return ret+"\n"
 
 
 usefull_pids = {}
@@ -59,23 +58,17 @@ def check_processes():
     global event_buffer
     # check for new process
     pids = psutil.pids()
-    # print pids
     for pid in pids:
         if usefull_pids.has_key(pid):
             continue
         if rubbish_pids.has_key(pid):
             continue
-        #               try:
         attempt_id = get_attempt_id(pid)
         if attempt_id:
-            sys.stderr.write("Get new process [%d] for hadoop task attempt [%s]/n" % (pid, attempt_id))
+            sys.stderr.write("Get new process [%d] for hadoop task attempt [%s]\n" % (pid, attempt_id))
             usefull_pids[pid] = (attempt_id, psutil.Process(pid))
         else:
             rubbish_pids[pid] = pid
-    #               except:
-    #                       sys.stderr.write("Get attemp id for %d failed/n" % pid)
-    #                       sys.stderr.flush()
-    #                       continue
     for pid in usefull_pids.keys():
         if pid not in pids:
             del usefull_pids[pid]
@@ -141,13 +134,14 @@ def http_send_thread(post_url):
         if not read_thread_run:
             break
         try:
-            #print "Host: %s, path: %s" % (host, path)
-            conn = httplib.HTTPConnection(host)
             length = len(event_buffer)
+            conn = httplib.HTTPConnection(host)
             params = urllib.urlencode({"content": "".join(event_buffer[:length])})
-            conn.request("POST", path, params)
+            conn.request(method="POST", url=path, body=params)
             rep = conn.getresponse()
-            if rep.status == 200:
+            print event_buffer
+            print rep.status
+            if rep.status == httplib.OK:
                 with event_buffer_lock:
                     # print "[%d/%d] send" % (length, len(event_buffer))
                     event_buffer = event_buffer[length:]
@@ -161,7 +155,7 @@ def http_send_thread(post_url):
 
 if __name__ == "__main__":
     read_thread_run = True
-    t = threading.Thread(target=local_read_thread)
+    t = threading.Thread(target=http_send_thread,args=["127.0.0.1:8080/submit"])
     t.start()
     try:
         loop()

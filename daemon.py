@@ -30,22 +30,22 @@ class Daemon:
                                 # exit first parent
                                 sys.exit(0)
                 except OSError, e:
-                        sys.stderr.write("fork #1 failed: %d (%s)/n" % (e.errno, e.strerror))
+                        sys.stderr.write("fork #1 failed: %d (%s)\n" % (e.errno, e.strerror))
                         sys.exit(1)
-                # decouple from parent environment
+                #从母体环境脱离
                 # os.chdir("/")
                 os.setsid()
                 os.umask(0)
-                # do second fork
+                #执行第二次fork
                 try:
                         pid = os.fork()
                         if pid > 0:
                                 # exit from second parent
                                 sys.exit(0)
                 except OSError, e:
-                        sys.stderr.write("fork #2 failed: %d (%s)/n" % (e.errno, e.strerror))
+                        sys.stderr.write("fork #2 failed: %d (%s)\n" % (e.errno, e.strerror))
                         sys.exit(1)
-                # redirect standard file descriptors
+                #进程已经是守护进程了，重定向标准文件描述符
                 sys.stdout.flush()
                 sys.stderr.flush()
                 si = file(self.stdin, 'r')
@@ -57,7 +57,7 @@ class Daemon:
                 # write pidfile
                 atexit.register(self.delpid)
                 pid = str(os.getpid())
-                file(self.pidfile,'w+').write("%s/n" % pid)
+                file(self.pidfile,'w+').write("%s\n" % pid)
         def delpid(self):
                 os.remove(self.pidfile)
         def start(self):
@@ -72,7 +72,7 @@ class Daemon:
                 except IOError:
                         pid = None
                 if pid:
-                        message = "pidfile %s already exist. Daemon already running?/n"
+                        message = "pidfile %s already exist. Daemon already running\n"
                         sys.stderr.write(message % self.pidfile)
                         sys.exit(1)
                 # Start the daemon
@@ -90,7 +90,7 @@ class Daemon:
                 except IOError:
                         pid = None
                 if not pid:
-                        message = "pidfile %s does not exist. Daemon not running?/n"
+                        message = "pidfile %s does not exist. Daemon not running\n"
                         sys.stderr.write(message % self.pidfile)
                         return # not an error in a restart
                 # Try killing the daemon process

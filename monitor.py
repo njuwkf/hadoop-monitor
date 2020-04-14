@@ -39,9 +39,9 @@ def get_event(pid, attempt_id, t):
             "current": t,
             "tuser": timeinfo[0],
             "tsystem": timeinfo[1],
-            "rss": meminfo[0],
-            "vms": meminfo[1],
-            "cpu": p.cpu_percent(),
+            "rss": 1.0*meminfo[0],
+            "vms": 1.0*meminfo[1],
+            "cpu": p.cpu_percent(interval=1),
             "threads": p.num_threads(),
             "host": hostname}
     ret = json.dumps(info)

@@ -32,8 +32,11 @@ class Job(object):
                 self.id = jobid
                 self.attempts = {}
                 self.time = 0
+                self.start_time = 0
                 self.parent = parent
-        def settime(self, t):
+        def set_start_time(self,t):
+                self.start_time = t
+        def set_time(self, t):
                 self.time = t
         def get(self,id,host=None):
                 ret = self.attempts.get(id)
@@ -45,15 +48,14 @@ class Job(object):
 #attempt类
 class Attempt(object):
         def __init__(self, attemptid, host, parent):
-#               print "Attempt %s" % attemptid
                 self.id = attemptid
                 self.exes = {}
                 self.time = 0
                 self.host = host
                 self.parent = parent
-        def settime(self, t):
+        def set_time(self, t):
                 self.time = t
-                self.parent.settime(t)
+                self.parent.set_time(t)
         def get(self,id, exe=None):
                 ret = self.exes.get(id)
                 if ret == None:
@@ -61,17 +63,17 @@ class Attempt(object):
                         self.exes[id] = ret
                 return ret
 
+#进程类
 class Exe(object):
         def __init__(self, pid, exe, parent):
-#               print "Exe %s" % exe
                 self.id = pid
                 self.exe = exe
                 self.seqs = {}
                 self.time = 0
                 self.parent = parent
-        def settime(self, t):
+        def set_time(self, t):
                 self.time = t
-                self.parent.settime(t)
+                self.parent.set_time(t)
         def get(self,id):
                 ret = self.seqs.get(id)
                 if ret == None:
@@ -79,6 +81,7 @@ class Exe(object):
                         self.seqs[id] = ret
                 return ret
 
+#进程单个资源记录（CPU，RSS，VMS）
 class Seq(object):
         def __init__(self, name, parent):
 #               print "Seq %s" % name
@@ -86,10 +89,10 @@ class Seq(object):
                 self.vs = []
                 self.time = 0
                 self.parent = parent
-        def appendtime(self, t):
+        def append_time(self, t):
                 self.time = t
                 self.vs.append(t)
-                self.parent.settime(t)
+                self.parent.set_time(t)
 
 #添加记录
 def add_record(rec, d):
@@ -99,21 +102,23 @@ def add_record(rec, d):
                 if job_id == None:
                         return
                 cmd = rec['cmd']
+                starttime = rec['start']
                 pid = rec['pid']
                 exename = os.path.basename(cmd[0]) if cmd else "None"
-                rss = rec['rss']
-                vms = rec['vms']
+                rss = rec['rss']/(1024*1024)
+                vms = rec['vms']/(1024*1024)
                 cpu = rec['cpu']
                 current = rec['current']
                 host = rec['host']
                 jobobj = d.get(job_id)
                 if not jobobj:
                         jobobj = Job(job_id, d)
+                        jobobj.set_start_time(starttime)
                         d[job_id] = jobobj
                 attempt = jobobj.get(attempt_id, host)
                 exe = attempt.get(pid, exename)
                 seqt = exe.get('t')
-                seqt.appendtime(current)
+                seqt.append_time(current)
                 exe.get('c').vs.append(cpu)
                 exe.get('r').vs.append(rss)
                 exe.get('v').vs.append(vms)
@@ -159,19 +164,18 @@ class jobs_view(object):
                 return out.getvalue()
         def POST(self):
                 self.GET()
+
+# 单个任务界面（显示单个job_id，该任务下各个task的id和最后更新时间）
 class job_view(object):
         def GET(self, job_id):
                 out = StringIO.StringIO()
-
-#单个任务界面（显示单个job_id，该任务下各个task的id和最后更新时间）
-                print job_id
                 out.write('<html><head><title>Job %s</title></head><body>' % job_id)
                 out.write('<h1>JobID: %s</h1>' % job_id)
                 job = all.get(job_id)
                 if not job:
                         out.write('Not Found!')
                 else:
-                        out.write('<h2>Time: %s</h2>' % time_to_string(job.time, True))
+                        out.write('<h2>Start Time: %s</h2>' % time_to_string(job.start_time, True))
                         out.write('<h2>List of task attempts:</h2>')
                         have = False
                         for attempt, obj in job.attempts.iteritems():
@@ -196,8 +200,8 @@ def output_exeinfo(exe, out):
         out.write('<table>')
         output_seq("Time:", exe.seqs['t'].vs,out,True)
         output_seq("CPU:", exe.seqs['c'].vs,out)
-        output_seq("RSS:", exe.seqs['r'].vs,out)
-        output_seq("VM:", exe.seqs['v'].vs,out)
+        output_seq("RSS(MB):", exe.seqs['r'].vs,out)
+        output_seq("VM(MB):", exe.seqs['v'].vs,out)
         out.write('</table>')
 
 #单个task_attempt界面（显示单个task_attempt界面）
@@ -261,8 +265,7 @@ class attempt_fig(object):
                 ax = fig.add_subplot(211)
                 for exe in exes.itervalues():
                         pn = "%s(%s)" % (exe.exe, exe.id)
-                        ax.plot(exe.seqs['t'].vs, [x/(1024*1024) for x in exe.seqs['r'].vs], label=pn+' RSS')
-                        #ax.plot(exe.seqs['t'].vs, exe.seqs['v'].vs, label=pn+' VM')
+                        ax.plot([time_to_string(x) for x in exe.seqs['t'].vs], [x for x in exe.seqs['r'].vs], label=pn+' RSS')
                 plt.ylim(0, 1024) #设置y轴最大最小值
                 ax.legend()       #添加图例
                 ax.grid(True)     #添加网格
@@ -270,7 +273,7 @@ class attempt_fig(object):
                 ax2 = fig.add_subplot(212)
                 for exe in exes.itervalues():
                         pn = "%s(%s)" % (exe.exe, exe.id)
-                        ax2.plot(exe.seqs['t'].vs, exe.seqs['c'].vs, label=pn+' CPU')
+                        ax2.plot([time_to_string(x) for x in exe.seqs['t'].vs],[x for x in exe.seqs['c'].vs], label=pn+' CPU')
                 plt.ylim(-5, 150)
                 ax2.legend()
                 ax2.grid(True)

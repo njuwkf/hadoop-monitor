@@ -1,18 +1,19 @@
 #!usr/bin/python
 # -*- coding: utf-8 -*-
 
-import re
 import traceback
-import sys
 import os
 import time
 import json
-import logging
 import web
-import urllib
 import cStringIO as StringIO
 import matplotlib.pyplot as plt
+from matplotlib.pyplot import MultipleLocator
 import cPickle as pickle
+
+from data import Job
+
+plt.switch_backend('agg')
 
 #得到jobid
 def get_jobid_by_attempid(attempt_id):
@@ -25,74 +26,6 @@ def get_jobid_by_attempid(attempt_id):
                 traceback.print_exc()
                 return None
 
-#job类
-class Job(object):
-        def __init__(self, jobid, parent):
-#               print "Job %s" % jobid
-                self.id = jobid
-                self.attempts = {}
-                self.time = 0
-                self.start_time = 0
-                self.parent = parent
-        def set_start_time(self,t):
-                self.start_time = t
-        def set_time(self, t):
-                self.time = t
-        def get(self,id,host=None):
-                ret = self.attempts.get(id)
-                if ret == None:
-                        ret = Attempt(id, host, self)
-                        self.attempts[id] = ret
-                return ret
-
-#attempt类
-class Attempt(object):
-        def __init__(self, attemptid, host, parent):
-                self.id = attemptid
-                self.exes = {}
-                self.time = 0
-                self.host = host
-                self.parent = parent
-        def set_time(self, t):
-                self.time = t
-                self.parent.set_time(t)
-        def get(self,id, exe=None):
-                ret = self.exes.get(id)
-                if ret == None:
-                        ret = Exe(id, exe, self)
-                        self.exes[id] = ret
-                return ret
-
-#进程类
-class Exe(object):
-        def __init__(self, pid, exe, parent):
-                self.id = pid
-                self.exe = exe
-                self.seqs = {}
-                self.time = 0
-                self.parent = parent
-        def set_time(self, t):
-                self.time = t
-                self.parent.set_time(t)
-        def get(self,id):
-                ret = self.seqs.get(id)
-                if ret == None:
-                        ret = Seq(id, self)
-                        self.seqs[id] = ret
-                return ret
-
-#进程单个资源记录（CPU，RSS，VMS）
-class Seq(object):
-        def __init__(self, name, parent):
-#               print "Seq %s" % name
-                self.id = name
-                self.vs = []
-                self.time = 0
-                self.parent = parent
-        def append_time(self, t):
-                self.time = t
-                self.vs.append(t)
-                self.parent.set_time(t)
 
 #添加记录
 def add_record(rec, d):
@@ -118,10 +51,26 @@ def add_record(rec, d):
                 attempt = jobobj.get(attempt_id, host)
                 exe = attempt.get(pid, exename)
                 seqt = exe.get('t')
-                seqt.append_time(current)
-                exe.get('c').vs.append(cpu)
-                exe.get('r').vs.append(rss)
-                exe.get('v').vs.append(vms)
+                # update process info
+                if jobobj.getseq('c').dict.get(current) == None:
+                        jobobj.getseq('c').dict[current] = 0
+                        jobobj.getseq('r').dict[current] = 0
+                        jobobj.getseq('v').dict[current] = 0
+                if not current in seqt.vs:
+                        seqt.append_time(current)
+                        jobobj.getseq('c').dict.update({current: cpu})
+                jobobj.getseq('c').dict.update({current: cpu + jobobj.getseq('c').dict[current]})
+                jobobj.getseq('r').dict.update({current: rss + jobobj.getseq('r').dict[current]})
+                jobobj.getseq('v').dict.update({current: vms + jobobj.getseq('v').dict[current]})
+                exe.get('c').dict.update({current: cpu})
+                exe.get('r').dict.update({current: rss})
+                exe.get('v').dict.update({current: vms})
+                exe.get('c').vs = sorted(exe.get('c').dict.items(), key=lambda item: item[0])
+                exe.get('r').vs = sorted(exe.get('r').dict.items(), key=lambda item: item[0])
+                exe.get('v').vs = sorted(exe.get('v').dict.items(), key=lambda item: item[0])
+                jobobj.getseq('c').vs = sorted(jobobj.getseq('c').dict.items(), key=lambda item: item[0])
+                jobobj.getseq('r').vs = sorted(jobobj.getseq('r').dict.items(), key=lambda item: item[0])
+                jobobj.getseq('v').vs = sorted(jobobj.getseq('v').dict.items(), key=lambda item: item[0])
         except:
                 traceback.print_exc()
 
@@ -134,6 +83,7 @@ urls = (
         '/', 'jobs_view',
         '/jobs', 'jobs_view',
         '/job_([_\d]+)', 'job_view',
+        '/job_info_([_\d]+)', 'job_info_view',
         '/(attempt_[^\s]+)', 'attempt_view',
         '/text/(attempt_[^\s]+)', 'attempt_text_view',
         '/fig/(attempt_[^\s]+).png', 'attempt_fig',
@@ -141,6 +91,8 @@ urls = (
         '/save', 'save_service',
         '/load', 'load_service',
         '/clean', 'clean_service',
+        '/text/([^\s]+)', 'job_info_text_view',
+        '/fig/([^\s]+).png', 'job_info_fig',
         )
 
 
@@ -157,13 +109,14 @@ class jobs_view(object):
                 have = False
                 for jobid,job in all.iteritems():
                         have = True
-                        out.write('<li><a href="/job_%s" mce_href="job_%s">job_%s</a> Last Update: %s</li>' % (jobid, jobid,jobid, time_to_string(job.time, True)))
+                        out.write('<li><a href="/job_%s">job %s</a> Last Update: %s  <a href="/job_info_%s">about job info</a></li>' % (jobid,jobid, time_to_string(job.time, True),jobid))
                 if not have:
                         out.write('<h1>No Jobs Found</h1>')
                 out.write('</body></html>')
                 return out.getvalue()
         def POST(self):
                 self.GET()
+
 
 # 单个任务界面（显示单个job_id，该任务下各个task的id和最后更新时间）
 class job_view(object):
@@ -180,29 +133,13 @@ class job_view(object):
                         have = False
                         for attempt, obj in job.attempts.iteritems():
                                 have = True
-                                out.write('<li><a href="/%s" mce_href="%s">%s</a> Last Update: %s on %s</li>' % (attempt, attempt,attempt, time_to_string(obj.time, True), obj.host))
+                                out.write('<li><a href="/%s">%s</a> Last Update: %s on %s</li>' % (attempt,attempt, time_to_string(obj.time, True), obj.host))
                         if not have:
                                 out.write('<h1>No Jobs Found</h1>')
                 out.write('</body></html>')
                 return out.getvalue()
         def POST(self, job_id):
                 self.GET(job_id)
-
-def output_seq(name, seq, out, t=False):
-        out.write('<tr>')
-        out.write('<td>%s</td>\n' % name)
-        for v in seq:
-                out.write('    <td>%s</td>\n' % (time_to_string(v) if t else str(v)))
-        out.write('</tr>')
-
-def output_exeinfo(exe, out):
-        out.write('<h2>%s - %s</h2>\n' % (exe.id, exe.exe) )
-        out.write('<table>')
-        output_seq("Time:", exe.seqs['t'].vs,out,True)
-        output_seq("CPU:", exe.seqs['c'].vs,out)
-        output_seq("RSS(MB):", exe.seqs['r'].vs,out)
-        output_seq("VM(MB):", exe.seqs['v'].vs,out)
-        out.write('</table>')
 
 #单个task_attempt界面（显示单个task_attempt界面）
 class attempt_view(object):
@@ -219,13 +156,31 @@ class attempt_view(object):
                                 out.write('Not Found!')
                         else:
                                 out.write('<h1>Attempt run on %s, %s last update: %s</h1>' % (attempt.host, attempt_id, time_to_string(attempt.time)))
-                                out.write('<h3><a href="/text/%s" mce_href="text/%s">Text Detail</a></h3>' % (attempt_id,attempt_id))
-                                out.write('<image src="/fig/%s.png" mce_src="fig/%s.png" />' % (attempt_id,attempt_id))
+                                out.write('<h3><a href="/text/%s" >Text Detail</a></h3>' % (attempt_id))
+                                out.write('<image src="/fig/%s.png" />' % (attempt_id))
                 out.write('</body></html>\n')
                 return out.getvalue()
         def POST(self, attempt_id):
                 self.GET(attempt_id)
 
+def output_seq(name, seq, out, t=False,first=False):
+        out.write('<tr>')
+        out.write('<td>%s</td>\n' % name)
+        for v in seq:
+                if first:
+                        out.write('    <td>%s</td>\n' % (time_to_string(v[0]) if t else str(v[0])))
+                else:
+                        out.write('    <td>%s</td>\n' % (time_to_string(v[1]) if t else str(v[1])))
+        out.write('</tr>')
+
+def output_exeinfo(exe, out):
+        out.write('<h2>%s - %s</h2>\n' % (exe.id, exe.exe) )
+        out.write('<table>')
+        output_seq("Time:", exe.seqs['c'].vs,out,True,True)
+        output_seq("CPU:", exe.seqs['c'].vs,out)
+        output_seq("RSS(MB):", exe.seqs['r'].vs,out)
+        output_seq("VM(MB):", exe.seqs['v'].vs,out)
+        out.write('</table>')
 
 # 单个task_attempt文本界面（显示单个task_attempt时间，CPU，内存信息）
 class attempt_text_view(object):
@@ -260,23 +215,37 @@ class attempt_fig(object):
                 if not attempt:
                         return web.notfound
                 exes = attempt.exes
-                fig = plt.figure(figsize=(18,12))
+                fig = plt.figure(figsize=(15,10))
                 #内存图
                 ax = fig.add_subplot(211)
                 for exe in exes.itervalues():
                         pn = "%s(%s)" % (exe.exe, exe.id)
-                        ax.plot([time_to_string(x) for x in exe.seqs['t'].vs], [x for x in exe.seqs['r'].vs], label=pn+' RSS')
-                plt.ylim(0, 1024) #设置y轴最大最小值
+                        ax.plot([time_to_string(x[0]) for x in exe.seqs['r'].vs], [x[1] for x in exe.seqs['r'].vs], 'm.-',label=pn+' RSS',linewidth=1)
+                # 设置y轴范围
+                plt.ylim(0, 1024)
+                #坐标轴朝内
+                plt.rcParams['xtick.direction'] = 'in'
+                plt.rcParams['ytick.direction'] = 'in'
+                #设置坐标轴名称
+                plt.xlabel('RSS(MB)')
+                plt.ylabel('Time')
+                x_major_locator = MultipleLocator(10)
+                ax.xaxis.set_major_locator(x_major_locator)
                 ax.legend()       #添加图例
-                ax.grid(True)     #添加网格
                 #CPU图
                 ax2 = fig.add_subplot(212)
                 for exe in exes.itervalues():
                         pn = "%s(%s)" % (exe.exe, exe.id)
-                        ax2.plot([time_to_string(x) for x in exe.seqs['t'].vs],[x for x in exe.seqs['c'].vs], label=pn+' CPU')
+                        ax2.plot([time_to_string(x[0]) for x in exe.seqs['c'].vs],[x[1] for x in exe.seqs['c'].vs], 'm.-',label=pn+' CPU',linewidth=1)
                 plt.ylim(-5, 150)
+                plt.rcParams['xtick.direction'] = 'in'
+                plt.rcParams['ytick.direction'] = 'in'
+                # 设置坐标轴名称
+                plt.xlabel('CPU')
+                plt.ylabel('Time')
+                x_major_locator = MultipleLocator(10)
+                ax2.xaxis.set_major_locator(x_major_locator)
                 ax2.legend()
-                ax2.grid(True)
                 web.header("Content-Type", "image/png")
                 buff = StringIO.StringIO()
                 fig.savefig(buff, format='png')
@@ -284,8 +253,92 @@ class attempt_fig(object):
         def POST(self, attempt_id):
                 self.GET(attempt_id)
 
+
+#显示单个job界面
+class job_info_view(object):
+        def GET(self, job_id):
+                out = StringIO.StringIO()
+                out.write('<html><head><title>Job %s</title></head><body>' % job_id)
+                job = all.get(job_id)
+                if not job:
+                        out.write('Not Found!')
+                else:
+                        out.write('<h1>Job %s last update: %s</h1>' % (job_id, time_to_string(job.time)))
+                        out.write('<h3><a href="/text/%s" >Text Detail</a></h3>' % (job_id))
+                        out.write('<image src="/fig/%s.png" />' % (job_id))
+                out.write('</body></html>\n')
+                return out.getvalue()
+        def POST(self, job_id):
+                self.GET(job_id)
+
+
+# 单个job文本界面（显示单个job时间，CPU，内存信息）
+class job_info_text_view(object):
+        def GET(self, job_id):
+                out = StringIO.StringIO()
+                out.write('<html><head><title>Job %s</title></head><body>\n' % job_id)
+                job = all.get(job_id)
+                if not job:
+                        out.write('Not Found!')
+                else:
+                        out.write('<h1>Job %s last update: %s</h1>\n' % (job_id, time_to_string(job.time)))
+                        out.write('<table>')
+                        output_seq("Time:", job.seqs['c'].vs, out, True, True)
+                        output_seq("CPU:", job.seqs['c'].vs, out)
+                        output_seq("RSS(MB):", job.seqs['r'].vs, out)
+                        output_seq("VM(MB):", job.seqs['v'].vs, out)
+                        out.write('</table>')
+                out.write('</body></html>\n')
+                return out.getvalue()
+        def POST(self, job_id):
+                self.GET(job_id)
+
+# 单个job图片界面（显示单个job时间，CPU，内存信息）
+class job_info_fig(object):
+        def GET(self, job_id):
+                job = all.get(job_id)
+                if not job:
+                        return web.notfound
+                fig = plt.figure(figsize=(15,10))
+                #内存图
+                ax = fig.add_subplot(211)
+                pn = "%s" % (job_id)
+                ax.plot([time_to_string(x[0]) for x in job.seqs['r'].vs], [x[1] for x in job.seqs['r'].vs], 'm.-',label=pn+' RSS',linewidth=1)
+                # 设置y轴范围
+                plt.ylim(0, 1024)
+                #坐标轴朝内
+                plt.rcParams['xtick.direction'] = 'in'
+                plt.rcParams['ytick.direction'] = 'in'
+                #设置坐标轴名称
+                plt.xlabel('RSS(MB)')
+                plt.ylabel('Time')
+                x_major_locator = MultipleLocator(10)
+                ax.xaxis.set_major_locator(x_major_locator)
+                ax.legend()       #添加图例
+                #CPU图
+                ax2 = fig.add_subplot(212)
+                pn = "%s" % (job_id)
+                ax2.plot([time_to_string(x[0]) for x in job.seqs['c'].vs],[x[1] for x in job.seqs['c'].vs], 'm.-',label=pn+' CPU',linewidth=1)
+                plt.ylim(-5, 150)
+                plt.rcParams['xtick.direction'] = 'in'
+                plt.rcParams['ytick.direction'] = 'in'
+                # 设置坐标轴名称
+                plt.xlabel('CPU')
+                plt.ylabel('Time')
+                x_major_locator = MultipleLocator(10)
+                ax2.xaxis.set_major_locator(x_major_locator)
+                ax2.legend()
+                web.header("Content-Type", "image/png")
+                buff = StringIO.StringIO()
+                fig.savefig(buff, format='png')
+                return buff.getvalue()
+        def POST(self, job_id):
+                self.GET(job_id)
+
+
 class submit_service(object):
         def POST(self):
+                global all
                 c = web.input().get('content')
                 records = c.split('\n')
                 for r in records:
@@ -322,6 +375,7 @@ class load_service(object):
                         return web.notfound
         def POST(self):
                 self.GET()
+
 class clean_service(object):
         def GET(self):
                 global all
@@ -336,5 +390,6 @@ class clean_service(object):
                         return web.notfound
         def POST(self):
                 self.GET()
+
 if __name__ == "__main__":
         app.run()

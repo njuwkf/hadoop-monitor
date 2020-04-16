@@ -72,7 +72,7 @@ class Daemon:
                 except IOError:
                         pid = None
                 if pid:
-                        message = "pidfile %s already exist. Daemon already running\n"
+                        message = "pidfile %s already exist. Daemon already running?/n"
                         sys.stderr.write(message % self.pidfile)
                         sys.exit(1)
                 # Start the daemon
@@ -90,7 +90,7 @@ class Daemon:
                 except IOError:
                         pid = None
                 if not pid:
-                        message = "pidfile %s does not exist. Daemon not running\n"
+                        message = "pidfile %s does not exist. Daemon not running?/n"
                         sys.stderr.write(message % self.pidfile)
                         return # not an error in a restart
                 # Try killing the daemon process
@@ -121,6 +121,7 @@ class mon_daemon(Daemon):
         def run(self):
                 read_thread_run = True
                 t = threading.Thread(target=http_send_thread,args=[sys.argv[1]])
+                t.daemon = True
                 t.start()
                 try:
                         loop()

@@ -1,16 +1,12 @@
 import web
 
-urls = (
-    '/(.*)','hello'
-)
-app = web.application(urls,globals())
-
-class hello:
-    def GET(self,name):
-        if not name:
-            name = 'World'
-        return 'Hello,'+name+'!'
 
 if __name__=="__main__":
-    app.run()
-
+    dict = {1586944224: 0.0, 1586944201: 0.0, 1586944203: 21.0, 1586944204: 0.0, 1586944206: 0.0, 1586944207: 5.0, 1586944209: 0.0, 1586944210: 0.0, 1586944211: 1.0, 1586944212: 0.0, 1586944213: 0.0, 1586944215: 0.0, 1586944216: 0.0, 1586944218: 0.0, 1586944219: 0.0, 1586944221: 0.0, 1586944222: 0.0, 1586944223: 18.0}
+    if dict.get(4) == None:
+        dict[4] = 0
+    dict.update({4:1+dict.get(4)})
+    print dict[4]
+    dict = sorted(dict.items(), key=lambda item: item[0])
+    for v in dict:
+        print v[1]
